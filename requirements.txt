@@ -1,0 +1,5 @@
+transformers torch sentence-transformers chromadb langchain
+datasets accelerate
+faiss-cpu
+python-dotenv
+bs4
