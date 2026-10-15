@@ -3,3 +3,4 @@ datasets accelerate
 faiss-cpu
 python-dotenv
 bs4
+google-genai

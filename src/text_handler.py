@@ -4,7 +4,7 @@ from pathlib import Path
 PROCESSED_DATA_PATH = Path(__file__).parent.parent / "data" / "processed"
 
 
-def extract_table_as_text(table_tag: Tag) -> str:
+def extract_table_as_text(table_tag: Tag):
     headers = [th.get_text(strip=True) for th in table_tag.select('thead th')]
     rows = []
     for tr in table_tag.select('tbody tr'):
@@ -18,7 +18,7 @@ def extract_table_as_text(table_tag: Tag) -> str:
     return "Projeções de inflação (IPCA): " + " | ".join(rows)
 
 
-def extract_paragraphs_from_html(html_content: str) -> list[str]:
+def extract_paragraphs_from_html(html_content: str):
     soup = BeautifulSoup(html_content, 'html.parser')
 
     main_content = soup.find('div', id='ataconteudo')
@@ -44,16 +44,16 @@ def extract_paragraphs_from_html(html_content: str) -> list[str]:
     return paragraphs
 
 
-def save_extracted_text(paragraphs: list[str], minute_number: int) -> None:
+def save_extracted_text(paragraphs: list[str], minute_number: int):
     file_path = PROCESSED_DATA_PATH / f"ata_{minute_number}.txt"
     file_path.write_text("\n\n".join(paragraphs), encoding="utf-8")
 
 
-def get_processed_minute(minute: int) -> list[str] | None:
+def get_processed_minute(minute: int):
     file_path = PROCESSED_DATA_PATH / f"ata_{minute}.txt"
     if not file_path.exists():
         return None
 
     print(f"Processando a ata {minute}...")
     text = file_path.read_text(encoding="utf-8")
-    return [p for p in text.split("\n\n") if p.strip()]
+    return text.split("\n\n")

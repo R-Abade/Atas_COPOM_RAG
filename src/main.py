@@ -1,27 +1,34 @@
 import json
 from pathlib import Path
-from json_handler import get_latest_minute_number, minute_exists, download_minute
-from text_handler import extract_paragraphs_from_html, save_extracted_text
+from requester import RequestsHttpClient
+from json_handler import CopomAPIClient, minute_exists
+from text_handler import extract_paragraphs_from_html, save_extracted_text, get_processed_minute
 
 def main():
+    http = RequestsHttpClient()
+    copom_client = CopomAPIClient(http)
+
     RAW_DATA_PATH = Path(__file__).parent.parent / "data" / "raw"
-    print("Obtendo número da ata mais recente...")
-    minute_number = get_latest_minute_number()
+    print("Obtendo números das 5 atas mais recente...")
+    minute_numbers = copom_client.get_latest_minute_numbers()
     
-    if minute_exists(minute_number):
-        print(f"Ata n°{minute_number} recente já existe!")
-    else:
-        print("Baixando ata mais recente...")
-        download_minute(minute_number)
+    for minute in minute_numbers:
+        if minute_exists(minute):
+            print(f"Ata n°{minute} recente já existe!")
+            processed_minute = get_processed_minute(minute)
+            print(processed_minute)
+        else:
+            print(f"Baixando ata n°{minute}...")
+            copom_client.download_minute(minute)
 
-        print("Extraindo texto da ata...")
-        with open(RAW_DATA_PATH / f"ata_{minute_number}.json", "r") as file:
-            json_file = json.load(file)
-        html_content = json_file["conteudo"][0]["textoAta"]
-        extract_minute = extract_paragraphs_from_html(html_content)
+            print(f"Extraindo texto da ata n°{minute}...")
+            with open(RAW_DATA_PATH / f"ata_{minute}.json", "r") as file:
+                json_file = json.load(file)
+            html_content = json_file["conteudo"][0]["textoAta"]
+            extract_minute = extract_paragraphs_from_html(html_content)
 
-        print("Salvando texto extraído...")
-        save_extracted_text(extract_minute, minute_number)
+            print(f"Salvando texto extraído da ata n°{minute}...")
+            save_extracted_text(extract_minute, minute)
 
 if __name__ == "__main__":
     main()
