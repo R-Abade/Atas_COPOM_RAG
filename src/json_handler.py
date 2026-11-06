@@ -17,7 +17,7 @@ class CopomAPIClient():
 
         return minute_numbers
 
-    def download_minute(minute_number: int):
+    def download_minute(self, minute_number: int):
         response = self.http.get_request(
             'https://www.bcb.gov.br/api/servico/sitebcb/copom/atas_detalhes',
             {'nro_reuniao': minute_number}

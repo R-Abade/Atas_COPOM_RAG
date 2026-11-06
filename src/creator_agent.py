@@ -11,4 +11,15 @@ class CreatorAgent:
         Baseie-se APENAS nas informações fornecidas, sem inventar dados."""
     
     def run(self, analysis: str, format_type: str = "resumo") -> str:
-        pass
+        prompt = f"""{self.system_prompt}
+
+        Análise recebida:
+        {analysis}
+
+        Formato solicitado: {format_type}
+
+        Produza o texto final."""
+
+        response = self.llm.generate([{"role": "user", "content": prompt}])
+        self.memory.add(f"Creator: {response}", agent="creator", importance=0.6)
+        return response

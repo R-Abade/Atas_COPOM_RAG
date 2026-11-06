@@ -1,5 +1,5 @@
 class AnalystAgent:
-    
+
     def __init__(self, llm: BaseLLM, tool: RagTools, memory: ShortTermMemory):
         self.llm = llm
         self.tool = tool
@@ -15,4 +15,15 @@ class AnalystAgent:
         Use a ferramenta compare_minutes quando necessário."""
     
     def run(self, research_data: str, user_question: str) -> str:
-        pass
+        prompt = f"""{self.system_prompt}
+
+        Dados coletados pelo Pesquisador:
+        {research_data}
+
+        Pergunta original do usuário: {user_question}
+
+        Produza sua análise com base nos dados acima."""
+
+        response = self.llm.generate([{"role": "user", "content": prompt}])
+        self.memory.add(f"Analyst: {response}", agent="analyst", importance=0.8)
+        return response

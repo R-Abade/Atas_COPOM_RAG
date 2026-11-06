@@ -4,7 +4,7 @@ from pathlib import Path
 PROCESSED_DATA_PATH = Path(__file__).parent.parent / "data" / "processed"
 
 
-def extract_table_as_text(table_tag: Tag):
+def extract_table_as_text(table_tag: Tag) -> str:
     headers = [th.get_text(strip=True) for th in table_tag.select('thead th')]
     rows = []
     for tr in table_tag.select('tbody tr'):

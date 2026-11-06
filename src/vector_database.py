@@ -10,7 +10,7 @@ class VectorDatabase:
         self.client = chroma_client
         self.collection = collection
     
-    def add(self, embedding : EmbeddingModel, text : str, minute_number : int, section : str, paragraph_number : str):
+    def add(self, embedding: list, text: str, minute_number: int, section: str, paragraph_number: int):
         self.collection.add(
             embeddings = embedding,
             metadatas = [{
