@@ -32,14 +32,5 @@ class VectorDatabase:
         )
         return results
 
-    def store_conversation(self, query, response):
-        """Armazena conversa no banco vetorial"""
-        embedding = self.embedding_model.generate_embedding(query)
-        self.embeddings.append(embedding)
-        self.conversations.append({
-            "query": query,
-            "response": response,
-            "embedding": embedding
-        })
 
 

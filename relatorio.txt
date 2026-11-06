@@ -1,0 +1,142 @@
+RELATÓRIO — SISTEMA RAG PARA ATAS DO COPOM
+==========================================
+
+
+1. ARQUITETURA IMPLEMENTADA
+----------------------------
+
+O sistema foi construído do zero, sem o uso de frameworks RAG prontos como LangChain
+ou LlamaIndex. O pipeline completo é composto por sete etapas:
+
+  [1] Coleta
+      A classe CopomAPIClient (json_handler.py) consulta a API pública do Banco Central
+      do Brasil para obter os números das 5 atas mais recentes e faz o download do JSON
+      completo de cada uma. O cliente HTTP (requester.py) centraliza as requisições com
+      tratamento de erros.
+
+  [2] Extração de texto
+      O conteúdo das atas é disponibilizado em HTML dentro do JSON. A função
+      extract_paragraphs_from_html (text_handler.py) usa BeautifulSoup para parsear o
+      HTML e extrair seções, parágrafos e tabelas, preservando a estrutura original do
+      documento. O resultado é salvo em arquivos .txt na pasta data/processed/.
+
+  [3] Chunking
+      A classe Chunk (chunker.py) divide o texto processado em unidades menores — um
+      chunk por parágrafo. Cada chunk é um objeto com quatro campos: texto, número da
+      ata, nome da seção e número do parágrafo. Essa granularidade foi escolhida por
+      equilibrar contexto suficiente por unidade e precisão na recuperação.
+
+  [4] Embedding
+      A classe EmbeddingModel (embedding.py) usa o modelo all-MiniLM-L6-v2 da biblioteca
+      sentence-transformers para converter cada chunk em um vetor numérico (embedding).
+      O modelo roda localmente, sem custo de API.
+
+  [5] Indexação
+      A classe VectorDatabase (vector_database.py) persiste os vetores e os textos no
+      ChromaDB, um banco de dados vetorial local. Cada entrada armazena o embedding, o
+      texto do chunk e os metadados (ata, seção, parágrafo).
+
+  [6] Recuperação
+      Na consulta, a pergunta do usuário é convertida em vetor com o mesmo modelo de
+      embedding. O ChromaDB realiza a busca por similaridade e retorna os 5 chunks mais
+      próximos semanticamente da pergunta.
+
+  [7] Geração
+      Os chunks recuperados são concatenados e enviados como contexto ao Gemini
+      (gemini-2.5-flash-lite) via Google GenAI SDK. O modelo recebe uma instrução de
+      sistema para responder apenas com base no contexto fornecido. O resultado é exibido
+      na interface CLI.
+
+  Fluxo resumido:
+      API BCB → extração → chunks → embeddings → ChromaDB
+                                                     |
+      pergunta → embedding → busca vetorial → contexto → Gemini → resposta
+
+
+2. DESAFIOS ENCONTRADOS
+------------------------
+
+  a) Documentação escassa do Google GenAI SDK
+     A documentação oficial do SDK google-genai é recente e passou por mudanças
+     significativas com o lançamento do Gemini 2.0. A API antiga usava
+     generate_content(), enquanto a nova usa interactions.create() com parâmetros
+     diferentes (output_text em vez de .text, context não é um campo válido, etc.).
+     Isso causou respostas vazias até o mapeamento correto dos parâmetros.
+
+  b) Compatibilidade do ChromaDB com Python 3.14
+     O ChromaDB 1.5.9 apresentou o erro "File exists (os error 17)" ao ser executado
+     com Python 3.14.4. O problema está nas bindings Rust do ChromaDB, que não tratam
+     corretamente diretórios pré-existentes nessa versão do Python. A versão suportada
+     oficialmente é até Python 3.12.
+
+  c) Documentação de embeddings
+     A distinção entre os task_types RETRIEVAL_DOCUMENT e RETRIEVAL_QUERY da API de
+     embeddings do Gemini não estava clara na documentação principal, exigindo busca em
+     páginas secundárias. No final, optou-se por usar sentence-transformers localmente,
+     eliminando essa dependência e o custo de API.
+
+  d) Separação entre indexação e consulta
+     A versão inicial do main.py misturava o loop de indexação com a lógica de consulta,
+     fazendo o input() ser chamado uma vez por ata (5 vezes). Isso bloqueava a execução
+     e impedia qualquer resposta de ser exibida. A solução foi separar em duas funções
+     distintas: index_minutes() e run_interface().
+
+
+3. RESULTADOS OBTIDOS
+----------------------
+
+  O sistema responde corretamente a perguntas sobre o conteúdo das atas, baseando-se
+  exclusivamente nos chunks recuperados. Exemplo real de execução:
+
+  ------------------------------------------------------------
+  Assistente Copom — RAG
+  Digite 'sair' para encerrar.
+  ------------------------------------------------------------
+
+  Pergunta: qual foi o percentual de redução da taxa de juros?
+  Buscando...
+  Gerando resposta...
+
+  ------------------------------------------------------------
+  Com base no contexto fornecido, não há a informação sobre o percentual exato de
+  redução da taxa de juros (quanto ela caiu em relação a uma taxa anterior). O texto
+  apenas menciona os diferentes patamares para os quais a taxa básica de juros foi
+  reduzida (14,50% a.a., 14,00% a.a., 14,75% a.a., 13,75% a.a. e 14,25% a.a.).
+  Portanto, não encontrei a informação sobre o percentual de redução.
+  ------------------------------------------------------------
+
+  O comportamento acima é o esperado: o modelo não inventa informações. Quando o
+  contexto não contém a resposta exata, o sistema informa de forma honesta ao invés de
+  alucinar. Perguntas mais diretas, como "o que o Copom decidiu sobre a taxa de juros?",
+  retornam os valores e justificativas presentes nas atas.
+
+
+4. POSSÍVEIS MELHORIAS
+-----------------------
+
+  a) Qualidade do chunking
+     O chunking atual divide por parágrafo, o que pode gerar chunks muito curtos
+     (parágrafos de uma linha) ou muito longos (parágrafos densos). Uma estratégia de
+     chunking com tamanho fixo em tokens e sobreposição (overlap) melhoraria a cobertura
+     semântica de cada unidade.
+
+  b) Modelo de embedding em português
+     O modelo all-MiniLM-L6-v2 é multilíngue mas foi treinado predominantemente em
+     inglês. Usar um modelo específico para português, como
+     neuralmind/bert-base-portuguese-cased ou rufimelo/bert-large-portuguese-cased-sts,
+     poderia melhorar a precisão da busca semântica.
+
+  c) Reranking
+     Após a busca vetorial, aplicar um modelo de reranking (ex: cross-encoder) para
+     reordenar os chunks recuperados com base na relevância real para a pergunta,
+     aumentando a qualidade do contexto enviado ao Gemini.
+
+  d) Cobertura das atas
+     Atualmente o sistema indexa apenas as 5 atas mais recentes. Expandir para o
+     histórico completo permitiria responder perguntas comparativas entre períodos
+     diferentes da política monetária.
+
+  e) Interface web
+     Substituir a CLI por uma interface web simples (ex: Streamlit ou Gradio) tornaria
+     o sistema mais acessível, sem necessidade de terminal.
+
