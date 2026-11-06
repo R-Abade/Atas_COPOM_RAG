@@ -2,25 +2,59 @@
 
 Sistema de Recuperação Aumentada por Geração (RAG) construído do zero para responder perguntas sobre as atas do Comitê de Política Monetária (Copom) do Banco Central do Brasil.
 
-O sistema busca automaticamente as atas mais recentes, processa e indexa o conteúdo, e responde perguntas em linguagem natural usando busca semântica + Gemini como modelo de geração.
+O sistema busca automaticamente as atas mais recentes, processa e indexa o conteúdo, e responde perguntas em linguagem natural usando busca semântica + arquitetura multi-agente com Gemini.
 
 ---
 
 ## Como funciona
 
+### Pipeline de indexação
+
 ```
-API do BCB → extração HTML → chunks → embeddings → ChromaDB
-                                                        ↓
-                         pergunta do usuário → embedding → busca vetorial → top-k chunks → Gemini → resposta
+API do BCB → JSON → extração HTML (BeautifulSoup) → parágrafos + tabela
+                                                            ↓
+                                              chunks com metadados (ata, seção, parágrafo)
+                                                            ↓
+                                                embedding (sentence-transformers)
+                                                            ↓
+                                                       ChromaDB
+```
+
+### Pipeline de consulta
+
+```
+pergunta → classify_intent (Gemini)
+                ↓
+        ┌───────┴──────────────┐
+     FACTUAL               ANALISE / CRIACAO
+        ↓                       ↓
+  ResearcherAgent         ResearcherAgent
+  (busca vetorial             ↓
+   + Gemini)            AnalystAgent
+                             ↓
+                       CreatorAgent (se CRIACAO)
 ```
 
 1. **Coleta** — busca as 5 atas mais recentes pela API pública do Banco Central
-2. **Extração** — parseia o HTML da ata e separa seções, parágrafos e tabelas
-3. **Chunking** — divide o texto em unidades menores (um chunk por parágrafo), cada um com metadados de ata, seção e número do parágrafo
-4. **Embedding** — converte cada chunk em vetor numérico com `sentence-transformers`
-5. **Indexação** — armazena vetores e textos no ChromaDB (banco de dados vetorial local)
-6. **Consulta** — a pergunta do usuário é convertida em vetor, comparada com os chunks indexados, e os mais similares são enviados ao Gemini como contexto
-7. **Geração** — o Gemini responde com base apenas no contexto recuperado
+2. **Extração** — parseia o HTML da ata, separando seções (`<h3>`), parágrafos (`<p class="paragrafo">`) e tabelas de projeção
+3. **Chunking** — um chunk por parágrafo, com metadados de ata, seção e número do parágrafo
+4. **Embedding** — converte cada chunk em vetor numérico com `sentence-transformers` localmente
+5. **Indexação** — armazena vetores e metadados no ChromaDB (persistente em `data/vector_db/`)
+6. **Classificação de intenção** — o `OrchestratorAgent` usa o Gemini para classificar a pergunta como `FACTUAL`, `ANALISE` ou `CRIACAO`
+7. **Roteamento** — direciona para o fluxo de agentes adequado
+8. **Geração** — cada agente especializado usa o Gemini com um system prompt específico para produzir a resposta
+
+---
+
+## Arquitetura de agentes
+
+| Agente | Responsabilidade |
+|---|---|
+| `OrchestratorAgent` | Classifica a intenção e roteia para o agente correto |
+| `ResearcherAgent` | Busca chunks relevantes no vector store e responde com citação de fonte |
+| `AnalystAgent` | Recebe dados do Researcher e identifica tendências, comparações e mudanças de retórica |
+| `CreatorAgent` | Transforma análises em textos executivos estruturados |
+| `ShortTermMemory` | Memória compartilhada entre agentes, com controle de importância e limite de itens |
 
 ---
 
@@ -29,19 +63,25 @@ API do BCB → extração HTML → chunks → embeddings → ChromaDB
 ```
 RAG/
 ├── data/
-│   ├── raw/              # JSONs brutos baixados da API do BCB
-│   ├── processed/        # Textos extraídos das atas (.txt)
-│   └── vector_db/        # Banco de dados vetorial (ChromaDB)
+│   ├── raw/                  # JSONs brutos baixados da API do BCB
+│   ├── processed/            # Textos extraídos das atas (.txt)
+│   └── vector_db/            # Banco de dados vetorial (ChromaDB)
 ├── src/
-│   ├── main.py           # Ponto de entrada — indexação + interface CLI
-│   ├── requester.py      # Cliente HTTP com tratamento de erros
-│   ├── json_handler.py   # Comunicação com a API do BCB
-│   ├── text_handler.py   # Extração e limpeza do HTML das atas
-│   ├── chunker.py        # Divisão do texto em chunks com metadados
-│   ├── embedding.py      # Geração de embeddings com sentence-transformers
-│   ├── vector_database.py# Indexação e busca no ChromaDB
-│   └── llm.py            # Integração com o Gemini (geração de resposta)
-├── .env                  # Chave de API (não versionado)
+│   ├── main.py               # Ponto de entrada — indexação + interface CLI
+│   ├── requester.py          # Cliente HTTP com tratamento de erros
+│   ├── json_handler.py       # Comunicação com a API do BCB
+│   ├── text_handler.py       # Extração e limpeza do HTML das atas
+│   ├── chunker.py            # Divisão do texto em chunks com metadados
+│   ├── embedding.py          # Geração de embeddings com sentence-transformers
+│   ├── vector_database.py    # Indexação e busca no ChromaDB
+│   ├── llm_base.py           # Classes base e implementações de LLM (Gemini, Ollama)
+│   ├── tools.py              # Ferramentas RAG disponíveis para os agentes
+│   ├── memory.py             # Memória de curto prazo compartilhada entre agentes
+│   ├── orchestrator_agent.py # Classificação de intenção e roteamento
+│   ├── researcher_agent.py   # Agente de busca factual
+│   ├── analyst_agent.py      # Agente de análise e tendências
+│   └── creator_agent.py      # Agente de geração de documentos
+├── .env                      # Chave de API (não versionado)
 ├── requirements.txt
 └── README.md
 ```
@@ -101,11 +141,11 @@ Ata n°281 já existe, pulando indexação.
 
 Pergunta: O que o Copom decidiu sobre a taxa de juros na última reunião?
 
-Gerando resposta...
+🤖 Assistente: O Copom decidiu reduzir a taxa básica de juros para 13,75% a.a. ...
 
-------------------------------------------------------------
-O Copom decidiu reduzir a taxa básica de juros para 13,75% a.a. ...
-------------------------------------------------------------
+Pergunta: Compare as decisões das últimas duas reuniões
+
+🤖 Assistente: [análise comparativa gerada pelo AnalystAgent] ...
 ```
 
 ---
@@ -116,7 +156,7 @@ O Copom decidiu reduzir a taxa básica de juros para 13,75% a.a. ...
 |---|---|
 | `sentence-transformers` | Geração de embeddings localmente |
 | `chromadb` | Banco de dados vetorial persistente |
-| `google-genai` | Geração de resposta com o Gemini |
+| `google-genai` | Geração de resposta e classificação de intenção com Gemini |
 | `bs4` (BeautifulSoup) | Extração de texto do HTML das atas |
 | `python-dotenv` | Leitura da chave de API do `.env` |
 | `requests` | Requisições à API do Banco Central |
@@ -125,7 +165,8 @@ O Copom decidiu reduzir a taxa básica de juros para 13,75% a.a. ...
 
 ## Observações
 
-- O sistema **não usa nenhuma biblioteca RAG pronta** (sem LangChain, sem LlamaIndex). A recuperação e o pipeline foram implementados manualmente.
+- O pipeline de ingestão foi implementado **manualmente**, sem LangChain ou LlamaIndex.
 - Os embeddings são gerados **localmente** com `all-MiniLM-L6-v2`, sem custo de API.
-- O Gemini é usado **apenas para geração** da resposta final, com o contexto recuperado das atas.
-- Se o Gemini estiver indisponível ou o contexto estiver vazio, o sistema retorna uma mensagem de fallback em vez de travar.
+- O Gemini é usado para **classificação de intenção e geração de resposta**. Cada agente tem um system prompt especializado.
+- O projeto suporta troca de LLM — `OllamaLLM` está disponível em `llm_base.py` para uso com modelos locais (ex: `qwen2.5:3b`).
+- As atas já indexadas não são reprocessadas em execuções futuras.
